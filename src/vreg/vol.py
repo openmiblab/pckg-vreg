@@ -1374,12 +1374,12 @@ def volume(values:np.ndarray, affine:np.ndarray=None,
         if coords is None:
             coords = [np.arange(d) for d in values.shape[3:]]
             coords = np.meshgrid(*coords, indexing='ij')
-            coords = np.stack(coords, axis=0) # coordinates for volume i, j are coords[:,i,j]
+            coords = np.stack(coords, axis=0, dtype=object) # coordinates for volume i, j are coords[:,i,j]
         elif isinstance(coords, tuple):
             coords = np.meshgrid(*coords, indexing='ij')
-            coords = np.stack(coords, axis=0)   
+            coords = np.stack(coords, axis=0, dtype=object)   
         else:         
-            coords = np.asarray(coords)
+            coords = np.asarray(coords, dtype=object)
 
     return Volume3D(values, affine, coords, dims, prec)
 
