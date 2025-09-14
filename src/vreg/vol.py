@@ -2,13 +2,38 @@ import numpy as np
 
 from vreg import mod_affine, metrics, utils, optimize
 
+
+def _check_dims(dims, shape):
+    if len(dims) != len(shape)-3:
+        raise ValueError(
+            f"dims should have {len(shape)-3} values."
+        )  
+
+def _check_coords(coords, shape):
+
+    if not isinstance(coords, list):
+        raise ValueError("coords must be a list of arrays")
+    if len(coords) != len(shape)-3:
+        raise ValueError(
+            f"coords should have {len(shape)-3} elements."
+        )
+    for coord in coords:
+        if not isinstance(coord, np.ndarray):
+            raise ValueError(
+                'All coordinates should be numpy arrays.'
+            )
+        if coord.shape != shape[3:]:
+            raise ValueError(
+                f"All coordinates should have dimensions {shape[3:]}."
+            )
+
 class Volume3D:
     # TODO: for multidimensional volumes, one affine per volume
     # API ND:
     # values[:, :, :, i, j]
-    # affine[:, :, i, j]
-    # coords[:, i, j]
-    # dims[i], dims[j]
+    # affine[:, :, i, j] -> Allow each volume to have its own affine?
+    # coords[:][i, j]
+    # dims[:]
     # API 3D:
     # values[:, :, :]
     # affine[:, :]
@@ -22,8 +47,8 @@ class Volume3D:
         affine (np.ndarray): 4x4 numpy array with the affine matrix 
             of the value array. If not provided, the identity is assumed. 
             Defaults to None.  
-        coords (np.ndarray): For values with dimensions more than 3, 
-            provide an additional coordinate array for the locations 
+        coords (list): For values with more than 3 dimensions, 
+            provide a list of coordinate arrays for the locations 
             of the replicated volumes. If not provided, index arrays 
             are used for the coordinates of the extra dimensions.
         dims (list): Names of the extra dimensions for volumes with more 
@@ -34,7 +59,7 @@ class Volume3D:
     """
 
     def __init__(self, values:np.ndarray, affine:np.ndarray, 
-                 coords:np.ndarray=None, dims:list=None, prec:int=None):
+                 coords:list=None, dims:list=None, prec:int=None):
         
         # Set precision
         if prec is not None:
@@ -64,28 +89,15 @@ class Volume3D:
             # Set dims
             if dims is None:
                 dims = list(range(values.ndim-3))
-            elif len(dims) != values.ndim-3:
-                raise ValueError(
-                    f"dims should have {values.ndim-3} values."
-                )  
+            _check_dims(dims, values.shape)  
             self._dims = dims
 
             # Set coords
             if coords is None:
                 coords = [np.arange(d) for d in values.shape[3:]]
                 coords = np.meshgrid(*coords, indexing='ij')
-                coords = np.stack(coords, axis=0)
-            elif not isinstance(coords, np.ndarray):
-                raise ValueError("coords must be a numpy array")
-            # coords[i,j,k,n]
-            elif coords.shape[0] != values.ndim-3:
-                raise ValueError(
-                    f"coords should have {values.ndim-3} coordinates."
-                )
-            elif coords.shape[1:] != values.shape[3:]:
-                raise ValueError(
-                    f"coords should have dimensions {values.shape[3:]}."
-                )
+                coords = list(coords)
+            _check_coords(coords, values.shape)
             self._coords = coords
             
     
@@ -183,8 +195,7 @@ class Volume3D:
         Raises:
             ValueError: If the new coords have the wrong shape.
         """
-        if coords.shape != self._coords.shape:
-            raise ValueError("New coordinate array has the wrong shape")
+        _check_coords(coords, self.shape)
         self._coords = coords
         return self
 
@@ -198,10 +209,7 @@ class Volume3D:
         Raises:
             ValueError: If the new dims has the wrong length.
         """
-        if len(dims) != self.values.ndim-3:
-            raise ValueError(
-                f"dims should have {self.values.ndim-3} values."
-            )   
+        _check_dims(dims, self.shape)    
         self._dims = dims
         return self
 
@@ -218,7 +226,7 @@ class Volume3D:
         return Volume3D(
             self.values.copy(**kwargs), 
             self.affine.copy(**kwargs),
-            self.coords.copy(**kwargs),
+            [c.copy(**kwargs) for c in self.coords],
             list(np.asarray(self.dims).copy(**kwargs)),
             self._prec,
         )
@@ -259,20 +267,24 @@ class Volume3D:
             raise ValueError("A 3D volume can not be separated. Perhaps "
                               "you wanted to split()?")
         if axis is not None:
+
+            # Separate along a prespecified dimensions
             vols = []
             for i in range(self.shape[axis]):
-                coords_i = _take_keepdims(self.coords, i, 1+axis-3)
-                affine_i = self.affine.copy()
+                coords_i = [_take_view_keepdims(c, i, axis-3) for c in self.coords]
+                affine_i = self.affine
                 values_i = _take_view_keepdims(self.values, i, axis)
                 # Build the volume and add to the list.
                 vol_i = Volume3D(values_i, affine_i, coords_i, self.dims) 
                 vols.append(vol_i)
             return np.asarray(vols) 
+        
         else:
-            axis = self.ndim-1
+            # Separate along all dimensions
+            axis = 3
             vols = self.separate(axis) # 1D
-            if axis > 3:
-                axis -= 1
+            if axis < self.ndim-1:
+                axis += 1
                 shape = vols.shape
                 vols = [v.separate(axis) for v in vols.reshape(-1)]
                 newdim = vols[0].size
@@ -464,16 +476,14 @@ class Volume3D:
         if len(self.shape)==3:
             values_reslice, _ = mod_affine.affine_reslice(self.values, self.affine, affine)
         else:
-            # Get a flattened view
-            values = self.values.reshape(self.shape[:3] + (-1,))
-            # Loop over volumes
-            for i in range(values.shape[-1]):
-                values_reslice_i, _ = mod_affine.affine_reslice(values[...,i], self.affine, affine)
-                if i==0:
-                    values_reslice = np.empty(values_reslice_i.shape + (values.shape[-1],))
-                values_reslice[...,i] = values_reslice_i
-
-        # Return volume
+            values_reshape = self.values.reshape(self.shape[:3] + (-1,))
+            values_reslice_0, _ = mod_affine.affine_reslice(values_reshape[...,0], self.affine, affine)
+            values_reslice = np.zeros(values_reslice_0.shape + (values_reshape.shape[-1],))
+            values_reslice[...,0] = values_reslice_0
+            for d in range(1, values_reshape.shape[-1]):
+                values_reslice[...,d], _ = mod_affine.affine_reslice(values_reshape[...,d], self.affine, affine)
+            values_reslice = values_reslice.reshape(values_reslice_0.shape + self.shape[3:])
+       
         return Volume3D(values_reslice, affine, self.coords, self.dims)
     
 
@@ -971,9 +981,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         translation = params[:3]
         rotation = params[3:6]
         stretch = params[6:9]
@@ -983,9 +990,22 @@ class Volume3D:
                                         stretch, coords)
 
         # Apply affine transformation
-        values = mod_affine.affine_transform_and_reslice(
-            self.values, self.affine, target.shape, target.affine, transform,
-        )
+        if self.ndim > 3:
+            values_reshape = self.values.reshape(self.shape[:3] + (-1,))
+            values_0 = mod_affine.affine_transform_and_reslice(
+                values_reshape[...,0], self.affine, target.shape, target.affine, transform,
+            )
+            values = np.zeros(values_0.shape + (values.shape[-1],))
+            values[...,0] = values_0
+            for d in range(1, values.shape[-1]):
+                values[...,d] = mod_affine.affine_transform_and_reslice(
+                    self.values[...,d], self.affine, target.shape, target.affine, transform,
+                )
+            values = values.reshape(values_0.shape + self.shape[3:])
+        else:
+            values = mod_affine.affine_transform_and_reslice(
+                self.values, self.affine, target.shape, target.affine, transform,
+            )
         affine = target.affine.copy()
     
         # Return volume
@@ -1014,9 +1034,7 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
+
         stretch = np.ones(3)
         params = np.concatenate((params, stretch))
         return self.transform_affine_to(target, params, coords=coords, 
@@ -1044,9 +1062,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         translation = np.zeros(3)
         stretch = np.ones(3)
         params = np.concatenate((translation, rotation, stretch))
@@ -1075,9 +1090,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         if dir=='xy':
             translation = np.concatenate((translation, [0]))
         elif dir=='z':
@@ -1100,9 +1112,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         translation = np.zeros(3)
         rotation = np.zeros(3)
         params = np.concatenate((translation, rotation, stretch))
@@ -1137,24 +1146,35 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            if values:
-                raise ValueError(
-                    "This function is not yet available for volumes "
-                    "with more than 3 dimensions"
-                )
+
         translation = params[:3]
         rotation = params[3:6]
         stretch = params[6:9]
 
         # Get affine transformation
-        transform = self._affine_matrix(translation, rotation, center, 
-                                        stretch, coords)
+        transform = self._affine_matrix(
+            translation, rotation, center, stretch, coords
+        )
 
         # Apply affine transformation
         if values:
-            values, affine = mod_affine.affine_transform(
-                self.values, self.affine, transform, reshape)
+            affine = self.affine.copy()
+            if self.ndim > 3:
+                values_reshape = self.values.reshape(self.shape[:3] + (-1,))
+                values_0 = mod_affine.affine_transform(
+                    values_reshape[...,0], self.affine, transform, reshape
+                )
+                values = np.zeros(values_0.shape + (values.shape[-1],))
+                values[...,0] = values_0
+                for d in range(1, values.shape[-1]):
+                    values[...,d] = mod_affine.affine_transform(
+                        values_reshape[...,d], self.affine, transform, reshape
+                    )
+                values = values.reshape(values_0.shape + self.shape[3:])
+            else:
+                values, _ = mod_affine.affine_transform(
+                    self.values, self.affine, transform, reshape
+                ) 
         else:
             values = self.values.copy()
             affine = transform.dot(self.affine)
@@ -1189,9 +1209,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         stretch = np.ones(3)
         params = np.concatenate((params, stretch))
         return self.transform_affine(params, center=center, values=values, 
@@ -1224,9 +1241,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         translation = np.zeros(3)
         stretch = np.ones(3)
         params = np.concatenate((translation, rotation, stretch))
@@ -1261,12 +1275,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            if values:
-                raise ValueError(
-                    "Translating values is not yet available for volumes "
-                    "with more than 3 dimensions."
-                )
         if dir=='xy':
             translation = np.concatenate((translation, [0]))
         elif dir=='z':
@@ -1276,7 +1284,6 @@ class Volume3D:
         params = np.concatenate((translation, rotation, stretch))
         return self.transform_affine(params, values=values, reshape=reshape, 
                                      coords=coords)
-
 
     def stretch(self, stretch, values=False, reshape=False):
         """Stretch the volume.
@@ -1295,9 +1302,6 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
-        if self.ndim > 3:
-            raise ValueError("This function is not yet available for volumes "
-                             "with more than 3 dimensions")
         translation = np.zeros(3)
         rotation = np.zeros(3)
         params = np.concatenate((translation, rotation, stretch))
@@ -1335,10 +1339,10 @@ def volume(values:np.ndarray, affine:np.ndarray=None,
         affine (array, optional): 4x4 affine array. If this is not provided, 
           the affine array is constructed from the other arguments. Defaults 
           to None.
-        coords (array, optional): Array with coordinates for volumes that 
+        coords (list or tuple, optional): coordinates for volumes that 
           have more than 3 dimensions (non-spatial dimensions). If values 
-          has N non-spatial dimensions, coords can be an N-dimensionsal 
-          coordinate array or a tuple of N 1D arrays. Values of the 
+          has N non-spatial dimensions, coords can be a list of N  
+          coordinate arrays or a tuple of N 1D arrays. Values of the 
           coords array can have any type including strings or tuples.
         orient (str, optional): Orientation of the volume. The options are 
           'axial', 'sagittal', or 'coronal'. Alternatively the same options 
@@ -1371,15 +1375,10 @@ def volume(values:np.ndarray, affine:np.ndarray=None,
         # This can only be done meaningfully if orient is specified
         values = np.expand_dims(values, -1)
     if values.ndim>3:
-        if coords is None:
-            coords = [np.arange(d) for d in values.shape[3:]]
-            coords = np.meshgrid(*coords, indexing='ij')
-            coords = np.stack(coords, axis=0, dtype=object) # coordinates for volume i, j are coords[:,i,j]
-        elif isinstance(coords, tuple):
-            coords = np.meshgrid(*coords, indexing='ij')
-            coords = np.stack(coords, axis=0, dtype=object)   
-        else:         
-            coords = np.asarray(coords, dtype=object)
+        if coords is not None:
+            if isinstance(coords, tuple):
+                coords = np.meshgrid(*coords, indexing='ij')
+                coords = list(coords)  
 
     return Volume3D(values, affine, coords, dims, prec)
 
@@ -1637,7 +1636,7 @@ def join(vols:np.ndarray): #concat->stack, join as a generalized stack, stack-> 
             axis += 1
 
 
-def mean(vol:Volume3D, axis=None):
+def mean(vol:Volume3D, axis=None): # replicates numpy function
     vals = np.mean(vol.values, axis=axis)
     if axis is None:
         vals = np.full(vol.shape, vals)
@@ -1647,14 +1646,14 @@ def mean(vol:Volume3D, axis=None):
         return Volume3D(vals, vol.affine.copy())
     if axis >= 3:
         dims = [d for i, d in enumerate(vol.dims) if i != axis-3]
-        coords = np.take(vol.coords, indices=0, axis=1+axis-3)
+        coords = [np.take(c, indices=0, axis=axis-3) for c in vol.coords]
         if dims==[]:
             dims = None
             coords = None
         else:
             # THIS NEEDS DEBUGGING
             inds = [i for i in range(coords.shape[0]) if i != axis]
-            coords = np.take(coords, indices=inds, axis=0)
+            coords = [np.take(c, indices=inds, axis=0) for c in vol.coords]
         mean_vol = Volume3D(vals, vol.affine.copy(), coords, dims)
     return mean_vol
 
@@ -1692,23 +1691,23 @@ def mean(vol:Volume3D, axis=None):
 #     return np.asarray(vol).reshape(shape)
 
 
-def _take_view(arr, i, axis):
-    # alternative to np.take() which returns a view
-    # Create a tuple of slice(None) (which selects all elements) for each axis
-    slc = [slice(None)] * arr.ndim
-    # Replace the desired axis with the scalar index
-    slc[axis] = i
-    return arr[tuple(slc)]  # Returns a view
+# def _take_view(arr, i, axis):
+#     # alternative to np.take() which returns a view
+#     # Create a tuple of slice(None) (which selects all elements) for each axis
+#     slc = [slice(None)] * arr.ndim
+#     # Replace the desired axis with the scalar index
+#     slc[axis] = i
+#     return arr[tuple(slc)]  # Returns a view
 
 def _take_view_keepdims(arr, i, axis):
     slc = [slice(None)] * arr.ndim
     slc[axis] = slice(i, i + 1)
     return arr[tuple(slc)]
 
-def _take_keepdims(arr, i, axis):
-    slc = [slice(None)] * arr.ndim
-    slc[axis] = slice(i, i + 1)
-    return arr[tuple(slc)].copy()
+# def _take_keepdims(arr, i, axis):
+#     slc = [slice(None)] * arr.ndim
+#     slc[axis] = slice(i, i + 1)
+#     return arr[tuple(slc)].copy()
 
 
 

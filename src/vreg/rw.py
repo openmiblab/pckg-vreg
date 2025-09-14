@@ -91,7 +91,7 @@ def create_zarr(vol:Volume3D, **kwargs):
     zarray[:] = vol.values
     zarray.attrs['affine'] = vol.affine.tolist()
     if vol.coords is not None:
-        zarray.attrs['coords'] = vol.coords.tolist()
+        zarray.attrs['coords'] = [c.tolist() for c in vol.coords]
         zarray.attrs['dims'] = vol.dims
     return zarray
 
