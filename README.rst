@@ -9,8 +9,8 @@ vreg
 Numpy arrays with spatial awareness
 -----------------------------------
 
-- **Documentation:** https://qib-sheffield.github.io/vreg
-- **Source code:** https://github.com/QIB-Sheffield/vreg
+- **Documentation:** https://openmiblab.github.io/vreg/
+- **Source code:** https://github.com/openmiblab/vreg
 
 
 Installation
