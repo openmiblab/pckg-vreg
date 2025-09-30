@@ -945,7 +945,9 @@ class Volume3D:
         """Slice the volume to the geometry of another volume
 
         Args:
-            v (Volume3D): reference volume with desired orientation and shape.
+            v (Volume3D or tuple): either a reference volume with 
+                desired orientation and shape, or a tuple (shape, affine) 
+                with a new shape and affine
 
         Returns:
             Volume3D: resliced volume
@@ -953,9 +955,17 @@ class Volume3D:
         if self.ndim > 3:
             raise ValueError("This function is not yet available for volumes "
                              "with more than 3 dimensions")
-        values, affine = mod_affine.affine_reslice(
-            self.values, self.affine, 
-            v.affine, output_shape=v.shape)
+        if isinstance(v, Volume3D):
+            if v.ndim > 3:
+                raise ValueError("This function is not yet available for volumes "
+                                "with more than 3 dimensions")
+            values, affine = mod_affine.affine_reslice(
+                self.values, self.affine, 
+                v.affine, output_shape=v.shape)
+        else:
+            values, affine = mod_affine.affine_reslice(
+                self.values, self.affine, 
+                v[1], output_shape=v[0])            
         return Volume3D(values, affine)
 
     
@@ -1289,7 +1299,7 @@ class Volume3D:
         """Stretch the volume.
 
         Args:
-            stretch (array-like): 3-element stretch vector with strictly 
+            stretch (array-like): 3-element stretch vector or scalar with strictly 
               positive dimensionless values (1 = no stretch). 
             values (bool, optional): If set to True, the values are 
               transformed. Otherwise the affine is transformed. Defaults to 
@@ -1302,6 +1312,8 @@ class Volume3D:
         Returns:
             vreg.Volume3D: transformed volume.
         """
+        if np.isscalar(stretch):
+            stretch = (stretch, stretch, stretch)
         translation = np.zeros(3)
         rotation = np.zeros(3)
         params = np.concatenate((translation, rotation, stretch))
