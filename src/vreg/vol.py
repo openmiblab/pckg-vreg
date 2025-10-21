@@ -1389,10 +1389,34 @@ def volume(values:np.ndarray, affine:np.ndarray=None,
     if values.ndim>3:
         if coords is not None:
             if isinstance(coords, tuple):
+                coords = [_list_to_array(c) for c in coords]
                 coords = np.meshgrid(*coords, indexing='ij')
                 coords = list(coords)  
 
     return Volume3D(values, affine, coords, dims, prec)
+
+
+
+def _list_to_array(lst):
+    """
+    Helper function: convert a Python list to a NumPy array.
+    
+    - If all elements share the same dtype (e.g., all int, all float, all str),
+      the returned array uses that dtype.
+    - If elements have mixed types or contain sublists, an object array is returned.
+    """
+    if isinstance(lst, np.ndarray):
+        return lst
+    if lst == []:  # empty list
+        return np.array([], dtype=object)
+
+    # If any element is a list or types are mixed, use dtype=object
+    element_types = {type(el) for el in lst}
+    if any(isinstance(el, (list, tuple, np.ndarray)) for el in lst) or len(element_types) > 1:
+        return np.array(lst, dtype=object)
+    
+    # Otherwise, let numpy infer a uniform dtype
+    return np.array(lst)
 
 
 
