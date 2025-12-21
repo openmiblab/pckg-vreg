@@ -146,11 +146,28 @@ class Volume3D:
         return self.affine[:3,2]/np.linalg.norm(self.affine[:3,2])
     
     @property
+    def pos(self):
+        return self.affine[:3,3]
+    
+    @property
     def is_right_handed(self):
         normal = np.cross(self.affine[:3,0], self.affine[:3,1])
         proj = np.dot(self.affine[:3,2], normal)
         return proj > 0
 
+
+    def loc(self, axis) -> float:
+        """Location of the volume along an axis
+
+        Args:
+            axis (int): either 0 (x-axis), 1 (y-axis) or 2 (z-axis)
+
+        Returns:
+            float: location along the specified axis
+        """
+        # project the position onto the axis direction
+        axis_dir = self.affine[:3, axis]/np.linalg.norm(self.affine[:3, axis])
+        return np.dot(self.affine[:3, 3], axis_dir)
 
 
     def set_values(self, values:np.ndarray):
@@ -1548,10 +1565,11 @@ def concatenate(vols, prec=None):
             "concatenated."
         )
 
-    # TODO: Generalize: they do not have to be in the correct order
     for axis in [0,1,2]:
         if _aligned_along_axis(vols, axis, prec):
-            affine = vols[0].affine
+            # Sort volumes according to position along concatenation axis
+            vols = sorted(vols, key=lambda v: v.loc(axis))
+            affine = vols[0].affine # use affine with smallest loc
             values = np.concatenate([v.values for v in vols], axis=axis)
             return Volume3D(values, affine)  
     raise ValueError(
@@ -1560,16 +1578,30 @@ def concatenate(vols, prec=None):
     )
 
 
+# def _OLD_aligned_along_axis(vols, axis, prec):
+#     mat = vols[0].affine[:3,:3]
+#     pos = [v.affine[:3,3] for v in vols]
+#     concat_vec = mat[:,axis]
+#     for i, v in enumerate(vols[:-1]):
+#         pos_next = pos[i] + concat_vec*v.shape[axis]
+#         dist = np.linalg.norm(pos[i+1]-pos_next)
+#         if prec is not None:
+#             dist = np.around(dist, prec)
+#         if dist > 0:
+#             return False
+#     return True
+
+
 def _aligned_along_axis(vols, axis, prec):
-    mat = vols[0].affine[:3,:3]
-    pos = [v.affine[:3,3] for v in vols]
-    concat_vec = mat[:,axis]
-    for i, v in enumerate(vols[:-1]):
-        pos_next = pos[i] + concat_vec*v.shape[axis]
-        dist = np.linalg.norm(pos[i+1]-pos_next)
+    axis_dir = vols[0].affine[:3,axis] / np.linalg.norm(vols[0].affine[:3,axis])
+    for i in range(len(vols)-1):
+        dz = vols[i+1].pos - vols[i].pos
+        proj = np.abs(np.dot(dz, axis_dir))
+        norm = np.linalg.norm(dz)
+        diff = norm - proj
         if prec is not None:
-            dist = np.around(dist, prec)
-        if dist > 0:
+            diff = np.around(diff, prec)
+        if diff != 0:
             return False
     return True
 
