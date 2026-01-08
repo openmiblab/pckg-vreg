@@ -1430,8 +1430,10 @@ def _list_to_array(lst):
     # If any element is a list or types are mixed, use dtype=object
     element_types = {type(el) for el in lst}
     if any(isinstance(el, (list, tuple, np.ndarray)) for el in lst) or len(element_types) > 1:
-        return np.array(lst, dtype=object)
-    
+        arr = np.empty(len(lst), dtype=object)
+        arr[:] = lst
+        return arr
+
     # Otherwise, let numpy infer a uniform dtype
     return np.array(lst)
 
