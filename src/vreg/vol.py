@@ -1529,8 +1529,6 @@ def full_like(v:Volume3D, fill_value):
 
 
 def concatenate(vols, prec=None):
-    #TODO remove move keyword
-    #TODO remove axis keyword. Isntead try each axis until one is found that fits.
     """Join a sequence of volumes along x-, y-, or z-axis.
 
     Volumes can only be joined up if they have the same shape 
@@ -1580,6 +1578,20 @@ def concatenate(vols, prec=None):
     )
 
 
+def _aligned_along_axis(vols, axis, prec):
+    axis_dir = vols[0].affine[:3,axis] / np.linalg.norm(vols[0].affine[:3,axis])
+    for i in range(len(vols)-1):
+        dz = vols[i+1].pos - vols[i].pos
+        proj = np.abs(np.dot(dz, axis_dir))
+        norm = np.linalg.norm(dz)
+        diff = norm - proj
+        if prec is not None:
+            diff = np.around(diff, prec)
+        if diff != 0:
+            return False
+    return True
+
+
 # def _OLD_aligned_along_axis(vols, axis, prec):
 #     mat = vols[0].affine[:3,:3]
 #     pos = [v.affine[:3,3] for v in vols]
@@ -1594,18 +1606,7 @@ def concatenate(vols, prec=None):
 #     return True
 
 
-def _aligned_along_axis(vols, axis, prec):
-    axis_dir = vols[0].affine[:3,axis] / np.linalg.norm(vols[0].affine[:3,axis])
-    for i in range(len(vols)-1):
-        dz = vols[i+1].pos - vols[i].pos
-        proj = np.abs(np.dot(dz, axis_dir))
-        norm = np.linalg.norm(dz)
-        diff = norm - proj
-        if prec is not None:
-            diff = np.around(diff, prec)
-        if diff != 0:
-            return False
-    return True
+
 
 
 def stack(vols, axis=3, prec=None):
