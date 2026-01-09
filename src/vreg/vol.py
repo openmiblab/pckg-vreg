@@ -146,11 +146,28 @@ class Volume3D:
         return self.affine[:3,2]/np.linalg.norm(self.affine[:3,2])
     
     @property
+    def pos(self):
+        return self.affine[:3,3]
+    
+    @property
     def is_right_handed(self):
         normal = np.cross(self.affine[:3,0], self.affine[:3,1])
         proj = np.dot(self.affine[:3,2], normal)
         return proj > 0
 
+
+    def loc(self, axis) -> float:
+        """Location of the volume along an axis
+
+        Args:
+            axis (int): either 0 (x-axis), 1 (y-axis) or 2 (z-axis)
+
+        Returns:
+            float: location along the specified axis
+        """
+        # project the position onto the axis direction
+        axis_dir = self.affine[:3, axis]/np.linalg.norm(self.affine[:3, axis])
+        return np.dot(self.affine[:3, 3], axis_dir)
 
 
     def set_values(self, values:np.ndarray):
@@ -1389,10 +1406,36 @@ def volume(values:np.ndarray, affine:np.ndarray=None,
     if values.ndim>3:
         if coords is not None:
             if isinstance(coords, tuple):
+                coords = [_list_to_array(c) for c in coords]
                 coords = np.meshgrid(*coords, indexing='ij')
                 coords = list(coords)  
 
     return Volume3D(values, affine, coords, dims, prec)
+
+
+
+def _list_to_array(lst):
+    """
+    Helper function: convert a Python list to a NumPy array.
+    
+    - If all elements share the same dtype (e.g., all int, all float, all str),
+      the returned array uses that dtype.
+    - If elements have mixed types or contain sublists, an object array is returned.
+    """
+    if isinstance(lst, np.ndarray):
+        return lst
+    if lst == []:  # empty list
+        return np.array([], dtype=object)
+
+    # If any element is a list or types are mixed, use dtype=object
+    element_types = {type(el) for el in lst}
+    if any(isinstance(el, (list, tuple, np.ndarray)) for el in lst) or len(element_types) > 1:
+        arr = np.empty(len(lst), dtype=object)
+        arr[:] = lst
+        return arr
+
+    # Otherwise, let numpy infer a uniform dtype
+    return np.array(lst)
 
 
 
@@ -1486,8 +1529,6 @@ def full_like(v:Volume3D, fill_value):
 
 
 def concatenate(vols, prec=None):
-    #TODO remove move keyword
-    #TODO remove axis keyword. Isntead try each axis until one is found that fits.
     """Join a sequence of volumes along x-, y-, or z-axis.
 
     Volumes can only be joined up if they have the same shape 
@@ -1524,10 +1565,11 @@ def concatenate(vols, prec=None):
             "concatenated."
         )
 
-    # TODO: Generalize: they do not have to be in the correct order
     for axis in [0,1,2]:
         if _aligned_along_axis(vols, axis, prec):
-            affine = vols[0].affine
+            # Sort volumes according to position along concatenation axis
+            vols = sorted(vols, key=lambda v: v.loc(axis))
+            affine = vols[0].affine # use affine with smallest loc
             values = np.concatenate([v.values for v in vols], axis=axis)
             return Volume3D(values, affine)  
     raise ValueError(
@@ -1537,17 +1579,34 @@ def concatenate(vols, prec=None):
 
 
 def _aligned_along_axis(vols, axis, prec):
-    mat = vols[0].affine[:3,:3]
-    pos = [v.affine[:3,3] for v in vols]
-    concat_vec = mat[:,axis]
-    for i, v in enumerate(vols[:-1]):
-        pos_next = pos[i] + concat_vec*v.shape[axis]
-        dist = np.linalg.norm(pos[i+1]-pos_next)
+    axis_dir = vols[0].affine[:3,axis] / np.linalg.norm(vols[0].affine[:3,axis])
+    for i in range(len(vols)-1):
+        dz = vols[i+1].pos - vols[i].pos
+        proj = np.abs(np.dot(dz, axis_dir))
+        norm = np.linalg.norm(dz)
+        diff = norm - proj
         if prec is not None:
-            dist = np.around(dist, prec)
-        if dist > 0:
+            diff = np.around(diff, prec)
+        if diff != 0:
             return False
     return True
+
+
+# def _OLD_aligned_along_axis(vols, axis, prec):
+#     mat = vols[0].affine[:3,:3]
+#     pos = [v.affine[:3,3] for v in vols]
+#     concat_vec = mat[:,axis]
+#     for i, v in enumerate(vols[:-1]):
+#         pos_next = pos[i] + concat_vec*v.shape[axis]
+#         dist = np.linalg.norm(pos[i+1]-pos_next)
+#         if prec is not None:
+#             dist = np.around(dist, prec)
+#         if dist > 0:
+#             return False
+#     return True
+
+
+
 
 
 def stack(vols, axis=3, prec=None):

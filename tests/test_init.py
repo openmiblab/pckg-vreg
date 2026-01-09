@@ -32,18 +32,19 @@ def test_coords():
     assert vol.coords[0][-1,-1] == 2
     assert vol.coords[1][-1,-1] == 8
 
-    # Well-formatted coordinates
+    # Well-formatted coordinates - same type
     coords = [np.zeros((3,9)), np.ones((3,9))]
     vol = vreg.Volume3D(vals, affine, coords)
     assert vol.coords[0][-1,-1] == 0
     assert vol.coords[1][-1,-1] == 1
 
+    # Well-formatted coordinates - mixed type
     coords = [np.full((3,9), 'A'), np.ones((3,9))]
     vol = vreg.Volume3D(vals, affine, coords)
     assert vol.coords[0][-1,-1] == 'A'
     assert vol.coords[1][-1,-1] == 1
 
-    # Ill-formatted coordinates
+    # Ill-formatted coordinates (single coordinate, needs two)
     coords = [np.zeros((3,9))]
     try:
         vol = vreg.Volume3D(vals, affine, coords)
@@ -52,6 +53,7 @@ def test_coords():
     else:
         assert False
 
+    # Ill-formatted coordinates (scalar)
     coords = np.zeros((3,9))
     try:
         vol = vreg.Volume3D(vals, affine, coords)
@@ -60,6 +62,7 @@ def test_coords():
     else:
         assert False
 
+    # Ill-formatted coordinates (one scalar)
     coords = ['A', np.ones((3,9))]
     try:
         vol = vreg.Volume3D(vals, affine, coords)
@@ -68,6 +71,7 @@ def test_coords():
     else:
         assert False
 
+    # Ill-formatted coordinates (wrong dimensions)
     coords = [np.full((2,9), 'A'), np.ones((3,9))]
     try:
         vol = vreg.Volume3D(vals, affine, coords)
