@@ -29,32 +29,6 @@ ZARR_IMPORT_ERROR = (
 )
 
 
-def write_npz(vol:Volume3D, filepath:str):
-    """Write a volume to a single file in numpy's uncompressed .npz file format
-
-    Args:
-        vol (Volume3D): the volume to write.
-        filepath (str): filepath to the .npz file.
-    """
-    np.savez(filepath, values=vol.values, affine=vol.affine)
-
-
-def read_npz(filepath:str):
-    """Load a volume created by write_npz()
-
-    Args:
-        filepath (str): filepath to the .npz file.
-
-    Returns:
-        Volume3D: the volume read from file.
-    """
-    npz = np.load(filepath)
-    if 'values' not in npz.files:
-        raise ValueError("The .npz file has not been created by write_npz.")
-    if 'affine' not in npz.files:
-        raise ValueError("The .npz file has not been created by write_npz.")
-    return Volume3D(npz['values'], npz['affine'])
-
 
 def _affine_to_from_RAH(affine):
     # convert to/from nifti coordinate system
@@ -62,12 +36,6 @@ def _affine_to_from_RAH(affine):
     rot_180[:2,:2] = [[-1,0],[0,-1]]
     return np.matmul(rot_180, affine)
 
-
-# TODO: Build a LazyVolume3D()??
-# vol = vreg.from_zarr(path)
-# vol.values is a zarray
-# read Volume3D with vol01 = vol[i0:i1]
-# write Colume3D with vol[i0:i1] = vol01
 
 
 def create_zarr(vol:Volume3D, **kwargs):
