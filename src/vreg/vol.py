@@ -1,4 +1,5 @@
 import numpy as np
+from pathlib import Path
 
 from vreg import mod_affine, metrics, utils, optimize
 
@@ -61,6 +62,13 @@ class Volume3D:
     def __init__(self, values:np.ndarray, affine:np.ndarray, 
                  coords:list=None, dims:list=None, prec:int=None):
         
+        # Initialize private attributes
+        self._prec = None
+        self._values = None
+        self._affine = None
+        self._coords = None
+        self._dims = None
+        
         # Set precision
         if prec is not None:
             if not isinstance(prec, int):
@@ -82,8 +90,18 @@ class Volume3D:
         self._affine = affine
 
         # Set coords & dims
-        self._coords = None
-        self._dims = None
+        if values.ndim == 3:
+            if dims is not None:
+                raise ValueError(
+                    f"You have specified extra dimensions {dims} but the values are 3D. "
+                    f"A 3D volume does not have additional dimensions."
+                )
+            if coords is not None:
+                raise ValueError(
+                    f"You have specified coordindates {coords} but the values are 3D. "
+                    f"A 3D volume does not have additional dimensions."
+                )
+        
         if values.ndim > 3:
 
             # Set dims
@@ -154,13 +172,71 @@ class Volume3D:
         normal = np.cross(self.affine[:3,0], self.affine[:3,1])
         proj = np.dot(self.affine[:3,2], normal)
         return proj > 0
+    
+
+    def write_npz(self, filepath:str):
+        """Write a volume to a single file in numpy's uncompressed .npz file format
+
+        Args:
+            filepath (str): filepath to the .npz file.
+        """
+        kwargs = {
+            'values': self.values,
+            'affine': self.affine,
+        }
+        if self.prec is not None:
+            kwargs['prec'] = self.prec
+        if self.dims is not None:
+            kwargs['dims'] = self.dims
+        if self.coords is not None:
+            # Save coords as an object array so types are preserved when reading
+            coords = np.empty(len(self.coords), dtype=object)
+            coords[:] = self.coords
+            kwargs['coords'] = coords
+
+        # Make sure the folder exists, then write
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(filepath, **kwargs)
 
 
-    def loc(self, axis) -> float:
+    def flip(self, axis=2):
+        """Converts in-place from left-handed to right-handed or vice versa
+
+        Args:
+            axis (int): which axis to flip, either 0 (x-axis), 1 (y-axis) or 2 (z-axis). Defaults to 2.
+
+        Returns:
+            Volume3D: the volume flipped
+        """
+        dpos = self.affine[:3, axis] * (self.shape[axis] - 1)
+        self.affine[:3, 3] += dpos
+        self.affine[:3, axis] *= -1
+        values = np.flip(self.values, axis=2)
+        return self.set_values(values)
+
+  
+    def to_right_handed(self, axis=2):
+        """Converts in-place from to right-handed
+
+        Args:
+            axis (int): which axis to flip for a left-handed volume, 
+                either 0 (x-axis), 1 (y-axis) or 2 (z-axis). Defaults to 2.
+
+        Returns:
+            Volume3D: the volume converted to right-handed
+        """
+        if self.is_right_handed:
+            return self
+        else:
+            return self.flip(axis=axis)
+
+
+    def loc(self, axis=2) -> float:
         """Location of the volume along an axis
 
         Args:
-            axis (int): either 0 (x-axis), 1 (y-axis) or 2 (z-axis)
+            axis (int): either 0 (x-axis), 1 (y-axis) or 2 (z-axis). Defaults to 2.
 
         Returns:
             float: location along the specified axis
@@ -353,7 +429,7 @@ class Volume3D:
             affine_i = vol.affine.copy()
             affine_i[:3, 3] += i*split_vec + i*gap*split_unit_vec
 
-            # Take the i-th slice and keep dimensions
+            # Take the i-th slice and keep dimensions ()
             values_i = _take_view_keepdims(vol.values, i, axis)
 
             # Build the volume and add to the list.
@@ -1355,6 +1431,35 @@ class Volume3D:
             self.values[:shape[0], :shape[1], :shape[2]],
             self.affine)
 
+
+def read_npz(filepath:str):
+    """Load a volume created by write_npz()
+
+    Args:
+        filepath (str): filepath to the .npz file.
+
+    Returns:
+        Volume3D: the volume read from file.
+    """
+    # Allow pickle to ensure coord array is correctly read
+    npz = np.load(filepath, allow_pickle=True)
+
+    # Check required attributes
+    if 'values' not in npz:
+        raise ValueError("The .npz file has not been created by write_npz.")
+    if 'affine' not in npz:
+        raise ValueError("The .npz file has not been created by write_npz.")
+    
+    # Add optional attributes
+    kwargs = {}
+    if 'prec' in npz:
+        kwargs['prec'] = npz['prec']
+    if 'dims' in npz:
+        kwargs['dims'] = npz['dims']
+    if 'coords' in npz:
+        kwargs['coords'] = npz['coords']
+
+    return Volume3D(npz['values'], npz['affine'], **kwargs)
 
         
 def volume(values:np.ndarray, affine:np.ndarray=None, 
