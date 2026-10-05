@@ -1056,7 +1056,7 @@ class Volume3D:
                                 "with more than 3 dimensions")
             values, affine = mod_affine.affine_reslice(
                 self.values, self.affine, 
-                v.affine, output_shape=v.shape)
+                v.affine, output_shape=v.shape, order=order)
         else:
             values, affine = mod_affine.affine_reslice(
                 self.values, self.affine, 
