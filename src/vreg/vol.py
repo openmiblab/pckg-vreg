@@ -1034,13 +1034,15 @@ class Volume3D:
         return Volume3D(values, affine)
 
     
-    def slice_like(self, v):
+    def slice_like(self, v, order=1):
         """Slice the volume to the geometry of another volume
 
         Args:
             v (Volume3D or tuple): either a reference volume with 
                 desired orientation and shape, or a tuple (shape, affine) 
                 with a new shape and affine
+            order (int, optional): The order of the spline interpolation.
+                Default is 1. The order has to be in the range 0-5.
 
         Returns:
             Volume3D: resliced volume
@@ -1054,11 +1056,11 @@ class Volume3D:
                                 "with more than 3 dimensions")
             values, affine = mod_affine.affine_reslice(
                 self.values, self.affine, 
-                v.affine, output_shape=v.shape)
+                v.affine, output_shape=v.shape, order=order)
         else:
             values, affine = mod_affine.affine_reslice(
                 self.values, self.affine, 
-                v[1], output_shape=v[0])            
+                v[1], output_shape=v[0], order=order)            
         return Volume3D(values, affine)
 
     
