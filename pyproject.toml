@@ -23,7 +23,7 @@ readme = "README.rst"
 authors = [
   { name = "Steven Sourbron", email = "s.sourbron@sheffield.ac.uk" },
 ]
-license = { file = "LICENSE" }
+license = "Apache-2.0"
 classifiers = [
   # How mature is this project? Common values are
   #   3 - Alpha
@@ -36,8 +36,6 @@ classifiers = [
   'Intended Audience :: Science/Research',
   'Topic :: Scientific/Engineering',
   'Operating System :: OS Independent',
-
-  'License :: OSI Approved :: Apache Software License',
   "Programming Language :: Python",
   "Programming Language :: Python :: 3"
 ]
